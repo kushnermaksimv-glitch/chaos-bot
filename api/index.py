@@ -1,4 +1,5 @@
 import telebot
+from telebot import types
 from flask import Flask, request
 
 BOT_TOKEN = "8797637018:AAEPb5IZ62NnXEp5hhbVFhzhI1gcVMW8fFg"
@@ -9,6 +10,23 @@ app = Flask(__name__)
 # Память для правил
 chat_rules = {}
 
+# 1. Регистрация команд в меню Telegram (выпадающий список при вводе /)
+def setup_bot_commands():
+    commands = [
+        types.BotCommand("start", "Запустить бота / Показать справку"),
+        types.BotCommand("rules", "Посмотреть правила чата"),
+        types.BotCommand("set_rules", "Установить правила (только админы)"),
+        types.BotCommand("set_title", "Изменить название группы (только админы)")
+    ]
+    # Устанавливаем меню команд для всех пользователей
+    bot.set_my_commands(commands)
+
+# Автоматически регистрируем меню команд при запуске кода
+try:
+    setup_bot_commands()
+except Exception as e:
+    print(f"Ошибка при установке меню команд: {e}")
+
 
 def is_admin(message):
     if message.chat.type == "private":
@@ -17,9 +35,18 @@ def is_admin(message):
     return status in ["administrator", "creator"]
 
 
+# 2. Обновленная и подробная команда /start
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.reply_to(message, "Привет! Добавь меня в группу и сделай администратором.")
+    start_text = (
+        "👋 **Привет! Я бот для управления настройками и правилами чата.**\n\n"
+        "**Доступные команды:**\n"
+        "📋 `/rules` — Посмотреть текущие правила группы.\n"
+        "⚙️ `/set_rules <текст>` — Задать новые правила (админам).\n"
+        "✏️ `/set_title <название>` — Изменить название группы (админам).\n\n"
+        "💡 *Для работы всех функций в группе назначьте меня администратором!*"
+    )
+    bot.reply_to(message, start_text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=['set_rules'])
