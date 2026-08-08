@@ -5,23 +5,15 @@ import random
 import string
 
 BOT_TOKEN = "8797637018:AAEPb5IZ62NnXEp5hhbVFhzhI1gcVMW8fFg"
-
-# Установите ваш секретный код доступа здесь:
 SECRET_CODE = "7777"
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
 processed_updates = set()
-creators = set()          # Список Telegram ID авторизованных создателей
-AVATAR_FILE_IDS = []     # База загруженных аватарок (File ID)
-
-RANDOM_TITLES = [
-    "🎪 БЕЗУМНЫЙ ЦИРК", "🛸 СЕКТА НЛО", "👾 КЛУБ АНОНИМНЫХ ГЕЙМЕРОВ",
-    "🔥 ЧАТ НА ГРАНИ ВЗРЫВА", "🍕 ПОКЛОННИКИ ПИЦЦЫ С АНАНАСАМИ",
-    "🤪 ДУРДОМ №13", "🤖 ВОССТАНИЕ МАШИН", "⚡ ОПАСНАЯ ЗОНА",
-    "🗿 КЛУБ ГИГАЧАДОВ", "🌋 ТЕРРИТОРИЯ ХАОСА"
-]
+creators = set()          # Список ID создателей
+AVATAR_FILE_IDS = []     # База загруженных аватарок
+saved_states = {}        # Хранилище исходного состояния чатов {chat_id: {"permissions": ..., "reactions": ...}}
 
 REACTION_SETS = [
     [types.ReactionTypeEmoji("👍"), types.ReactionTypeEmoji("👎")],
@@ -39,8 +31,9 @@ def setup_bot_commands():
     commands = [
         types.BotCommand("start", "Показать справку"),
         types.BotCommand("login", "Авторизация создателя (/login <код>)"),
-        types.BotCommand("set_title", "Изменить название группы (админам)"),
-        types.BotCommand("chaos", "Абсолютный хаос: настройки, аватарка и тэг 💥")
+        types.BotCommand("save", "Сохранить текущее состояние чата (админам)"),
+        types.BotCommand("restore", "Восстановить сохраненное состояние (админам)"),
+        types.BotCommand("chaos", "Хаос: настройки, аватарка и тэг (без смены названия) 💥")
     ]
     bot.set_my_commands(commands)
 
@@ -66,15 +59,16 @@ def start_cmd(message):
     start_text = (
         "👋 **Привет! Я бот для управления настройками чата.**\n\n"
         "**Команды:**\n"
-        "🔐 `/login <пароль>` — Панель создателя (для загрузки фото).\n"
-        "✏️ `/set_title <название>` — Изменить название группы.\n"
-        "💥 `/chaos` — Изменить настройки чата, аватарку и выдать тэг.\n\n"
-        "💡 *Для работы всех функций выдать боту права администратора!*"
+        "💾 `/save` — Сохранить текущие права и реакции чата.\n"
+        "🔄 `/restore` — Вернуть сохраненные права и реакции.\n"
+        "💥 `/chaos` — Включить хаос (права, аватарка, тэг).\n"
+        "🔐 `/login <пароль>` — Вход в панель создателя (для загрузки фото).\n\n"
+        "💡 *Сначала выполните `/save`, чтобы в любой момент отменить хаос!*"
     )
     bot.reply_to(message, start_text, parse_mode="Markdown")
 
 
-# 1. Авторизация по секретному коду
+# 1. Авторизация создателя
 @bot.message_handler(commands=['login'])
 def login_cmd(message):
     text_parts = message.text.split(maxsplit=1)
@@ -87,16 +81,78 @@ def login_cmd(message):
         creators.add(message.from_user.id)
         bot.reply_to(
             message,
-            "🔓 **Доступ разрешен! Панель создателя открыта.**\n\n"
-            "📸 Теперь просто **отправляйте мне фотографии** прямо в этот чат — я сохраню их и буду ставить в `/chaos`!\n"
-            "🗑 Чтобы очистить загруженные аватарки, отправьте `/clear_avatars`.",
+            "🔓 **Доступ разрешен!** Теперь отправляйте мне фотографии — они будут сохранены для использования в `/chaos`.\n"
+            "🗑 Чтобы очистить фото: `/clear_avatars`.",
             parse_mode="Markdown"
         )
     else:
         bot.reply_to(message, "❌ Неверный код доступа!")
 
 
-# 2. Прием и сохранение аватарок от создателя
+# 2. Сохранение исходного состояния чата
+@bot.message_handler(commands=['save'])
+def save_cmd(message):
+    if not is_admin(message):
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+
+    chat_id = message.chat.id
+    try:
+        chat_info = bot.get_chat(chat_id)
+        saved_states[chat_id] = {
+            "permissions": chat_info.permissions,
+            "reactions": chat_info.available_reactions
+        }
+        bot.reply_to(
+            message,
+            "💾 **Начальное состояние чата сохранено!**\n\n"
+            "После вызова `/chaos` вы сможите в любой момент вернуть все настройки командой `/restore`.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка при сохранении: {e}")
+
+
+# 3. Восстановление исходного состояния чата
+@bot.message_handler(commands=['restore'])
+def restore_cmd(message):
+    if not is_admin(message):
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+
+    chat_id = message.chat.id
+    if chat_id not in saved_states:
+        bot.reply_to(
+            message,
+            "⚠️ **Сохраненное состояние не найдено!**\nСначала выполните команду `/save`.",
+            parse_mode="Markdown"
+        )
+        return
+
+    state = saved_states[chat_id]
+    errors = []
+
+    # Восстановление прав
+    if state.get("permissions"):
+        try:
+            bot.set_chat_permissions(chat_id, state["permissions"])
+        except Exception as e:
+            errors.append(f"Права: {e}")
+
+    # Восстановление реакций
+    try:
+        bot.set_chat_available_reactions(chat_id, available_reactions=state.get("reactions"))
+    except Exception as e:
+        errors.append(f"Реакции: {e}")
+
+    report = "🔄 **Начальное состояние чата успешно восстановлено!**"
+    if errors:
+        report += "\n\n⚠️ *Ошибки:* " + ", ".join(errors)
+
+    bot.send_message(chat_id, report, parse_mode="Markdown")
+
+
+# 4. Сохранение фото от создателя
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     if message.from_user.id in creators:
@@ -104,22 +160,19 @@ def handle_photo(message):
         AVATAR_FILE_IDS.append(file_id)
         bot.reply_to(
             message,
-            f"✅ **Фотография сохранена в базу!**\n📸 Всего аватарок в базе: **{len(AVATAR_FILE_IDS)}**",
+            f"✅ **Фотография сохранена!**\n📸 Всего аватарок: **{len(AVATAR_FILE_IDS)}**",
             parse_mode="Markdown"
         )
-    else:
-        bot.reply_to(message, "❌ У вас нет доступа к загрузке. Сначала авторизуйтесь через `/login <код>`.")
 
 
-# 3. Очистить список аватарок
 @bot.message_handler(commands=['clear_avatars'])
 def clear_avatars_cmd(message):
     if message.from_user.id in creators:
         AVATAR_FILE_IDS.clear()
-        bot.reply_to(message, "🗑 Список загруженных аватарок очищен!")
+        bot.reply_to(message, "🗑 Список аватарок очищен!")
 
 
-# 4. Команда Хаоса
+# 5. Режим Хаоса (без изменения названия)
 @bot.message_handler(commands=['chaos'])
 def chaos_cmd(message):
     if not is_admin(message):
@@ -153,7 +206,7 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Тэг: {e}")
 
-    # Установка случайной аватарки из загруженных создателем
+    # Случайная аватарка из загруженных
     if AVATAR_FILE_IDS:
         try:
             random_file_id = random.choice(AVATAR_FILE_IDS)
@@ -163,14 +216,14 @@ def chaos_cmd(message):
         except Exception as e:
             errors.append(f"Аватарка: {e}")
 
-    # Набор реакций
+    # Случайные реакции
     try:
         chosen_reactions = random.choice(REACTION_SETS)
         bot.set_chat_available_reactions(chat_id, available_reactions=chosen_reactions)
     except Exception as e:
         errors.append(f"Реакции: {e}")
 
-    # Разрешения участников
+    # Случайные разрешения
     p_photos = random.choice([True, False])
     p_videos = random.choice([True, False])
     p_polls = random.choice([True, False])
@@ -192,49 +245,24 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Разрешения: {e}")
 
-    # Название группы
-    new_title = random.choice(RANDOM_TITLES)
-    try:
-        bot.set_chat_title(chat_id, new_title)
-    except Exception as e:
-        errors.append(f"Название: {e}")
-
     report = (
         f"💥 **РЕЖИМ ХАОСА АКТИВИРОВАН!** 💥\n\n"
-        f"🏷 **Новое название:** {new_title}\n"
         f"👤 **Тэг пользователю [{target_user.first_name}](tg://user?id={target_user.id}):** `{random_tag}`\n"
-        f"🖼 **Аватарка:** Обновлена из вашей базы (Всего: {len(AVATAR_FILE_IDS)})\n"
-        f"🎭 **Реакции:** Обновлены\n\n"
+        f"🖼 **Аватарка:** Сменена\n"
+        f"🎭 **Реакции:** Изменены\n\n"
         f"🔒 **Разрешения участников:**\n"
         f"- Фото: {'✅' if p_photos else '❌'}\n"
         f"- Видео/Файлы: {'✅' if p_videos else '❌'}\n"
         f"- Стикеры/GIF: {'✅' if p_other else '❌'}\n"
         f"- Опросы: {'✅' if p_polls else '❌'}\n"
-        f"- Приглашения: {'✅' if p_invites else '❌'}"
+        f"- Приглашения: {'✅' if p_invites else '❌'}\n\n"
+        f"💡 *Вернуть исходное состояние: `/restore`*"
     )
 
     if errors:
         report += f"\n\n⚠️ *Ошибки:* " + ", ".join(errors)
 
     bot.send_message(chat_id, report, parse_mode="Markdown")
-
-
-@bot.message_handler(commands=['set_title'])
-def set_title_cmd(message):
-    if not is_admin(message):
-        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
-        return
-
-    text_parts = message.text.split(maxsplit=1)
-    if len(text_parts) < 2:
-        bot.reply_to(message, "Использование: `/set_title Новое название`", parse_mode="Markdown")
-        return
-
-    try:
-        bot.set_chat_title(message.chat.id, text_parts[1])
-        bot.reply_to(message, "✅ Название группы изменено!")
-    except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка: {e}")
 
 
 @app.route('/', methods=['POST'])
