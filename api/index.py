@@ -1,7 +1,6 @@
 import telebot
 from telebot import types
 from flask import Flask, request
-import urllib.request
 import random
 import string
 
@@ -11,6 +10,7 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
 chat_rules = {}
+processed_updates = set()  # Защита от повторных вызовов Telegram
 
 RANDOM_TITLES = [
     "🎪 БЕЗУМНЫЙ ЦИРК", "🛸 СЕКТА НЛО", "👾 КЛУБ АНОНИМНЫХ ГЕЙМЕРОВ",
@@ -34,9 +34,8 @@ REACTION_SETS = [
 ]
 
 
-# Функция генерации рандомного тэга (титула) из букв и символов
-def generate_random_tag(length=10):
-    chars = string.ascii_letters + string.digits + "!@#$%^&*()_+-=[]{}|;:,.<>?"
+def generate_random_tag(length=8):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*()_+"
     return "".join(random.choice(chars) for _ in range(length))
 
 
@@ -46,7 +45,7 @@ def setup_bot_commands():
         types.BotCommand("rules", "Посмотреть правила чата"),
         types.BotCommand("set_rules", "Установить и закрепить правила (админам)"),
         types.BotCommand("set_title", "Изменить название группы (админам)"),
-        types.BotCommand("chaos", "Абсолютный хаос: настройки, правила и рандомный тэг 💥")
+        types.BotCommand("chaos", "Абсолютный хаос: настройки, правила и тэг 💥")
     ]
     bot.set_my_commands(commands)
 
@@ -60,8 +59,11 @@ except Exception as e:
 def is_admin(message):
     if message.chat.type == "private":
         return False
-    status = bot.get_chat_member(message.chat.id, message.from_user.id).status
-    return status in ["administrator", "creator"]
+    try:
+        status = bot.get_chat_member(message.chat.id, message.from_user.id).status
+        return status in ["administrator", "creator"]
+    except Exception:
+        return False
 
 
 @bot.message_handler(commands=['start'])
@@ -72,13 +74,12 @@ def start_cmd(message):
         "📋 `/rules` — Посмотреть текущие правила группы.\n"
         "⚙️ `/set_rules <текст>` — Задать и закрепить правила.\n"
         "✏️ `/set_title <название>` — Изменить название группы.\n"
-        "💥 `/chaos` — Изменить все настройки и выдать случайному человеку безумный тэг.\n\n"
-        "💡 *Для работы выдайте боту все права и право на назначение админов!*"
+        "💥 `/chaos` — Изменить настройки и выдать случайный тэг.\n\n"
+        "💡 *Для работы выдайте боту все права администратора!*"
     )
     bot.reply_to(message, start_text, parse_mode="Markdown")
 
 
-# МАКСИМАЛЬНЫЙ ХАОС + СЛУЧАЙНЫЙ ТЭГ
 @bot.message_handler(commands=['chaos'])
 def chaos_cmd(message):
     if not is_admin(message):
@@ -88,7 +89,7 @@ def chaos_cmd(message):
     chat_id = message.chat.id
     errors = []
 
-    # 1. Выбираем пользователя для выдачи рандомного тэга
+    # 1. Выдача случайного тэга
     target_user = message.from_user
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
@@ -96,7 +97,6 @@ def chaos_cmd(message):
     random_tag = generate_random_tag(8)
 
     try:
-        # Выдаем права администратора (минимальные) и ставим кастомный титул (тэг)
         bot.promote_chat_member(
             chat_id=chat_id,
             user_id=target_user.id,
@@ -111,7 +111,7 @@ def chaos_cmd(message):
         )
         bot.set_chat_administrator_custom_title(chat_id, target_user.id, random_tag)
     except Exception as e:
-        errors.append(f"Выдача тэга: {e}")
+        errors.append(f"Тэг: {e}")
 
     # 2. Набор реакций
     try:
@@ -120,7 +120,7 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Реакции: {e}")
 
-    # 3. Разрешения группы
+    # 3. Разрешения участников
     p_photos = random.choice([True, False])
     p_videos = random.choice([True, False])
     p_polls = random.choice([True, False])
@@ -149,7 +149,7 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Название: {e}")
 
-    # 5. Описание и закрепление правил
+    # 5. Описание и правила
     new_rules = random.choice(RANDOM_RULES)
     chat_rules[chat_id] = new_rules
 
@@ -164,22 +164,11 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Правила: {e}")
 
-    # 6. Смена аватарки
-    try:
-        random_seed = random.randint(1, 100000)
-        img_url = f"https://picsum.photos/500/500?random={random_seed}"
-        req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
-        photo_bytes = urllib.request.urlopen(req, timeout=5).read()
-        bot.set_chat_photo(chat_id, photo_bytes)
-    except Exception as e:
-        errors.append(f"Аватарка: {e}")
-
     report = (
         f"💥 **РЕЖИМ ХАОСА АКТИВИРОВАН!** 💥\n\n"
         f"🏷 **Новое название:** {new_title}\n"
-        f"👤 **Пользователю [{target_user.first_name}](tg://user?id={target_user.id}) выдан тэг:** `{random_tag}`\n"
-        f"🎭 **Реакции:** Набор эмодзи изменен\n"
-        f"🖼 **Аватарка:** Обновлена\n"
+        f"👤 **Тэг пользователю [{target_user.first_name}](tg://user?id={target_user.id}):** `{random_tag}`\n"
+        f"🎭 **Реакции:** Обновлены\n"
         f"📌 **Правила:** Закреплены\n\n"
         f"🔒 **Разрешения участников:**\n"
         f"- Фото: {'✅' if p_photos else '❌'}\n"
@@ -248,9 +237,21 @@ def set_title_cmd(message):
 @app.route('/', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        try:
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+
+            # Блокировка бесконечных повторов от Telegram
+            if update and update.update_id:
+                if update.update_id in processed_updates:
+                    return 'ok', 200
+                processed_updates.add(update.update_id)
+                if len(processed_updates) > 100:
+                    processed_updates.clear()
+
+            bot.process_new_updates([update])
+        except Exception as e:
+            print(f"Webhook error: {e}")
         return 'ok', 200
     return 'Forbidden', 403
 
