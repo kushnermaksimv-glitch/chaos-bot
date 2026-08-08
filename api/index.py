@@ -1,76 +1,77 @@
-import asyncio
+import telebot
 from flask import Flask, request
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import Update
 
 BOT_TOKEN = "8797637018:AAEPb5IZ62NnXEp5hhbVFhzhI1gcVMW8fFg"
 
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
+
+# Память для правил
 chat_rules = {}
 
 
-async def is_admin(bot: Bot, message: types.Message) -> bool:
+def is_admin(message):
     if message.chat.type == "private":
         return False
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    return member.status in ["administrator", "creator"]
+    status = bot.get_chat_member(message.chat.id, message.from_user.id).status
+    return status in ["administrator", "creator"]
 
 
-async def process_update(update_data):
-    # Создаем сессию бота внутри каждого запроса Vercel
-    async with Bot(token=BOT_TOKEN) as bot:
-        dp = Dispatcher()
-
-        @dp.message(Command("start"))
-        async def start_cmd(message: types.Message):
-            await message.reply("Привет! Добавь меня в группу и сделай администратором.")
-
-        @dp.message(Command("set_rules"))
-        async def set_rules_cmd(message: types.Message):
-            if not await is_admin(bot, message):
-                await message.reply("❌ Эта команда доступна только администраторам.")
-                return
-            args = message.text.split(maxsplit=1)
-            if len(args) < 2:
-                await message.reply("Использование: `/set_rules Текст правил`")
-                return
-            chat_rules[message.chat.id] = args[1]
-            await message.reply("✅ Правила чата обновлены!")
-
-        @dp.message(Command("rules"))
-        async def get_rules_cmd(message: types.Message):
-            rules = chat_rules.get(message.chat.id, "Правила еще не установлены.")
-            await message.reply(f"📋 **Правила чата:**\n\n{rules}")
-
-        @dp.message(Command("set_title"))
-        async def set_title_cmd(message: types.Message):
-            if not await is_admin(bot, message):
-                await message.reply("❌ Эта команда доступна только администраторам.")
-                return
-            args = message.text.split(maxsplit=1)
-            if len(args) < 2:
-                await message.reply("Использование: `/set_title Новое название`")
-                return
-            try:
-                await bot.set_chat_title(chat_id=message.chat.id, title=args[1])
-                await message.reply("✅ Название группы изменено!")
-            except Exception as e:
-                await message.reply(f"❌ Ошибка: {e}")
-
-        update = Update.model_validate(update_data, context={"bot": bot})
-        await dp.feed_update(bot, update)
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    bot.reply_to(message, "Привет! Добавь меня в группу и сделай администратором.")
 
 
-@app.route("/", methods=["POST"])
+@bot.message_handler(commands=['set_rules'])
+def set_rules_cmd(message):
+    if not is_admin(message):
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+
+    text_parts = message.text.split(maxsplit=1)
+    if len(text_parts) < 2:
+        bot.reply_to(message, "Использование: `/set_rules Текст правил`", parse_mode="Markdown")
+        return
+
+    chat_rules[message.chat.id] = text_parts[1]
+    bot.reply_to(message, "✅ Правила чата обновлены!")
+
+
+@bot.message_handler(commands=['rules'])
+def get_rules_cmd(message):
+    rules = chat_rules.get(message.chat.id, "Правила в этом чате еще не установлены.")
+    bot.reply_to(message, f"📋 *Правила чата:*\n\n{rules}", parse_mode="Markdown")
+
+
+@bot.message_handler(commands=['set_title'])
+def set_title_cmd(message):
+    if not is_admin(message):
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+
+    text_parts = message.text.split(maxsplit=1)
+    if len(text_parts) < 2:
+        bot.reply_to(message, "Использование: `/set_title Новое название`", parse_mode="Markdown")
+        return
+
+    try:
+        bot.set_chat_title(message.chat.id, text_parts[1])
+        bot.reply_to(message, "✅ Название группы изменено!")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+
+# Прием Webhook от Telegram
+@app.route('/', methods=['POST'])
 def webhook():
-    if request.method == "POST":
-        data = request.get_json(force=True)
-        asyncio.run(process_update(data))
-        return "ok", 200
-    return "Bot is running!", 200
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'ok', 200
+    return 'Forbidden', 403
 
 
-@app.route("/", methods=["GET"])
+@app.route('/', methods=['GET'])
 def index():
-    return "Bot status: OK"
+    return "Bot is running on Vercel!"
