@@ -3,6 +3,7 @@ from telebot import types
 from flask import Flask, request
 import urllib.request
 import random
+import string
 
 BOT_TOKEN = "8797637018:AAEPb5IZ62NnXEp5hhbVFhzhI1gcVMW8fFg"
 
@@ -11,44 +12,41 @@ app = Flask(__name__)
 
 chat_rules = {}
 
-# Варианты для случайного выбора
 RANDOM_TITLES = [
-    "🎪 БЕЗУМНЫЙ ЦИРК",
-    "🛸 СЕКТА НЛО",
-    "👾 КЛУБ АНОНИМНЫХ ГЕЙМЕРОВ",
-    "🔥 ЧАТ НА ГРАНИ ВЗРЫВА",
-    "🍕 ПОКЛОННИКИ ПИЦЦЫ С АНАНАСАМИ",
-    "🤪 ДУРДОМ №13",
-    "🤖 ВОССТАНИЕ МАШИН",
-    "⚡ ОПАСНАЯ ЗОНА",
-    "🗿 КЛУБ ГИГАЧАДОВ",
-    "💃 ТАНЦЫ ДО УТРА",
-    "🌋 ТЕРРИТОРИЯ ХАОСА"
+    "🎪 БЕЗУМНЫЙ ЦИРК", "🛸 СЕКТА НЛО", "👾 КЛУБ АНОНИМНЫХ ГЕЙМЕРОВ",
+    "🔥 ЧАТ НА ГРАНИ ВЗРЫВА", "🍕 ПОКЛОННИКИ ПИЦЦЫ С АНАНАСАМИ",
+    "🤪 ДУРДОМ №13", "🤖 ВОССТАНИЕ МАШИН", "⚡ ОПАСНАЯ ЗОНА",
+    "🗿 КЛУБ ГИГАЧАДОВ", "🌋 ТЕРРИТОРИЯ ХАОСА"
 ]
 
 RANDOM_RULES = [
     "1. Запрещено писать букву 'А'.\n2. Все сообщения отправлять только гифками.\n3. Админ всегда прав.",
     "1. Писать только капсом!\n2. Спамить смайликами в каждом сообщении.\n3. Не спорить с ботом.",
-    "1. Говорить только загадками.\n2. Каждое сообщение должно начинаться со слова 'Ибо'.\n3. Никакой логики!",
+    "1. Говорить только загадками.\n2. Каждое сообщение начинать со слова 'Ибо'.\n3. Никакой логики!",
     "1. Все должны хвалить пиццу.\n2. Ругаться запрещено, можно только мурчать.\n3. Правил нет!",
     "1. Сообщения без стикеров удаляются из памяти.\n2. Каждый час меняем тему.\n3. Полная анархия!"
 ]
 
-RANDOM_DESCRIPTIONS = [
-    "⚠️ Добро пожаловать в хаос. Удачи выжить!",
-    "Здесь нет логики. Только чистый рандом.",
-    "Если вы это читаете, значит бот опять переписал историю этой группы.",
-    "Правила меняются при каждом вызове команды. Пристегните ремни!"
+REACTION_SETS = [
+    [types.ReactionTypeEmoji("👍"), types.ReactionTypeEmoji("👎")],
+    [types.ReactionTypeEmoji("🤡"), types.ReactionTypeEmoji("💩"), types.ReactionTypeEmoji("🔥")],
+    [types.ReactionTypeEmoji("❤️"), types.ReactionTypeEmoji("😍"), types.ReactionTypeEmoji("🎉")],
 ]
+
+
+# Функция генерации рандомного тэга (титула) из букв и символов
+def generate_random_tag(length=10):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*()_+-=[]{}|;:,.<>?"
+    return "".join(random.choice(chars) for _ in range(length))
 
 
 def setup_bot_commands():
     commands = [
         types.BotCommand("start", "Показать справку"),
         types.BotCommand("rules", "Посмотреть правила чата"),
-        types.BotCommand("set_rules", "Установить правила (только админы)"),
-        types.BotCommand("set_title", "Изменить название группы (только админы)"),
-        types.BotCommand("chaos", "Активировать рандомный хаос 💥 (только админы)")
+        types.BotCommand("set_rules", "Установить и закрепить правила (админам)"),
+        types.BotCommand("set_title", "Изменить название группы (админам)"),
+        types.BotCommand("chaos", "Абсолютный хаос: настройки, правила и рандомный тэг 💥")
     ]
     bot.set_my_commands(commands)
 
@@ -69,18 +67,18 @@ def is_admin(message):
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     start_text = (
-        "👋 **Привет! Я бот для управления настройками и правилами чата.**\n\n"
+        "👋 **Привет! Я бот для управления настройками чата.**\n\n"
         "**Доступные команды:**\n"
         "📋 `/rules` — Посмотреть текущие правила группы.\n"
-        "⚙️ `/set_rules <текст>` — Задать новые правила (админам).\n"
-        "✏️ `/set_title <название>` — Изменить название группы (админам).\n"
-        "💥 `/chaos` — Сгенерировать случайное название, правила и аватарку (админам).\n\n"
-        "💡 *Для работы всех функций назначьте меня администратором!*"
+        "⚙️ `/set_rules <текст>` — Задать и закрепить правила.\n"
+        "✏️ `/set_title <название>` — Изменить название группы.\n"
+        "💥 `/chaos` — Изменить все настройки и выдать случайному человеку безумный тэг.\n\n"
+        "💡 *Для работы выдайте боту все права и право на назначение админов!*"
     )
     bot.reply_to(message, start_text, parse_mode="Markdown")
 
 
-# РАНДОМНЫЙ ХАОС
+# МАКСИМАЛЬНЫЙ ХАОС + СЛУЧАЙНЫЙ ТЭГ
 @bot.message_handler(commands=['chaos'])
 def chaos_cmd(message):
     if not is_admin(message):
@@ -90,27 +88,83 @@ def chaos_cmd(message):
     chat_id = message.chat.id
     errors = []
 
-    # Генерируем случайные параметры
-    new_title = random.choice(RANDOM_TITLES)
-    new_rules = random.choice(RANDOM_RULES)
-    new_desc = random.choice(RANDOM_DESCRIPTIONS)
+    # 1. Выбираем пользователя для выдачи рандомного тэга
+    target_user = message.from_user
+    if message.reply_to_message:
+        target_user = message.reply_to_message.from_user
 
-    # 1. Устанавливаем случайное название
+    random_tag = generate_random_tag(8)
+
+    try:
+        # Выдаем права администратора (минимальные) и ставим кастомный титул (тэг)
+        bot.promote_chat_member(
+            chat_id=chat_id,
+            user_id=target_user.id,
+            can_manage_chat=True,
+            can_delete_messages=False,
+            can_manage_video_chats=False,
+            can_restrict_members=False,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=True,
+            can_pin_messages=False
+        )
+        bot.set_chat_administrator_custom_title(chat_id, target_user.id, random_tag)
+    except Exception as e:
+        errors.append(f"Выдача тэга: {e}")
+
+    # 2. Набор реакций
+    try:
+        chosen_reactions = random.choice(REACTION_SETS)
+        bot.set_chat_available_reactions(chat_id, available_reactions=chosen_reactions)
+    except Exception as e:
+        errors.append(f"Реакции: {e}")
+
+    # 3. Разрешения группы
+    p_photos = random.choice([True, False])
+    p_videos = random.choice([True, False])
+    p_polls = random.choice([True, False])
+    p_other = random.choice([True, False])
+    p_invites = random.choice([True, False])
+
+    try:
+        new_permissions = types.ChatPermissions(
+            can_send_messages=True,
+            can_send_photos=p_photos,
+            can_send_videos=p_videos,
+            can_send_audios=p_photos,
+            can_send_documents=p_videos,
+            can_send_polls=p_polls,
+            can_send_other_messages=p_other,
+            can_invite_users=p_invites
+        )
+        bot.set_chat_permissions(chat_id, new_permissions)
+    except Exception as e:
+        errors.append(f"Разрешения: {e}")
+
+    # 4. Название группы
+    new_title = random.choice(RANDOM_TITLES)
     try:
         bot.set_chat_title(chat_id, new_title)
     except Exception as e:
         errors.append(f"Название: {e}")
 
-    # 2. Устанавливаем случайное описание
-    try:
-        bot.set_chat_description(chat_id, new_desc)
-    except Exception as e:
-        errors.append(f"Описание: {e}")
-
-    # 3. Сохраняем новые случайные правила в памяти бота
+    # 5. Описание и закрепление правил
+    new_rules = random.choice(RANDOM_RULES)
     chat_rules[chat_id] = new_rules
 
-    # 4. Скачиваем и устанавливаем случайную аватарку
+    try:
+        bot.set_chat_description(chat_id, f"🔥 ХАОС! Правила:\n{new_rules[:200]}")
+        pinned_msg = bot.send_message(
+            chat_id, 
+            f"💥 **РЕЖИМ ХАОСА! НОВЫЕ ПРАВИЛА:**\n\n{new_rules}", 
+            parse_mode="Markdown"
+        )
+        bot.pin_chat_message(chat_id, pinned_msg.message_id)
+    except Exception as e:
+        errors.append(f"Правила: {e}")
+
+    # 6. Смена аватарки
     try:
         random_seed = random.randint(1, 100000)
         img_url = f"https://picsum.photos/500/500?random={random_seed}"
@@ -120,20 +174,25 @@ def chaos_cmd(message):
     except Exception as e:
         errors.append(f"Аватарка: {e}")
 
-    # Отчет
-    status_text = (
+    report = (
         f"💥 **РЕЖИМ ХАОСА АКТИВИРОВАН!** 💥\n\n"
         f"🏷 **Новое название:** {new_title}\n"
-        f"📜 **Новые правила:**\n{new_rules}\n\n"
-        f"🖼 *Установлена новая случайная аватарка!*"
+        f"👤 **Пользователю [{target_user.first_name}](tg://user?id={target_user.id}) выдан тэг:** `{random_tag}`\n"
+        f"🎭 **Реакции:** Набор эмодзи изменен\n"
+        f"🖼 **Аватарка:** Обновлена\n"
+        f"📌 **Правила:** Закреплены\n\n"
+        f"🔒 **Разрешения участников:**\n"
+        f"- Фото: {'✅' if p_photos else '❌'}\n"
+        f"- Видео/Файлы: {'✅' if p_videos else '❌'}\n"
+        f"- Стикеры/GIF: {'✅' if p_other else '❌'}\n"
+        f"- Опросы: {'✅' if p_polls else '❌'}\n"
+        f"- Приглашения: {'✅' if p_invites else '❌'}"
     )
 
     if errors:
-        status_text += "\n\n⚠️ *Ошибки выполнения (проверьте права бота):*\n"
-        for err in errors:
-            status_text += f"- {err}\n"
+        report += f"\n\n⚠️ *Ошибки:* " + ", ".join(errors)
 
-    bot.send_message(chat_id, status_text, parse_mode="Markdown")
+    bot.send_message(chat_id, report, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=['set_rules'])
@@ -147,8 +206,19 @@ def set_rules_cmd(message):
         bot.reply_to(message, "Использование: `/set_rules Текст правил`", parse_mode="Markdown")
         return
 
-    chat_rules[message.chat.id] = text_parts[1]
-    bot.reply_to(message, "✅ Правила чата обновлены!")
+    new_rules = text_parts[1]
+    chat_rules[message.chat.id] = new_rules
+
+    try:
+        pinned_msg = bot.send_message(
+            message.chat.id, 
+            f"📌 **ОФИЦИАЛЬНЫЕ ПРАВИЛА ЧАТА:**\n\n{new_rules}", 
+            parse_mode="Markdown"
+        )
+        bot.pin_chat_message(message.chat.id, pinned_msg.message_id)
+        bot.reply_to(message, "✅ Правила установлены и закреплены!")
+    except Exception as e:
+        bot.reply_to(message, f"✅ Правила сохранены. Ошибка закрепления: {e}")
 
 
 @bot.message_handler(commands=['rules'])
